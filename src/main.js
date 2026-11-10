@@ -1,12 +1,17 @@
+import { STORAGE_KEYS, getStorage } from "./state.js";
+import { esc, inputNumber, formatInput, formatSignedInput, pc, dfmt, pad, cl } from "./format.js";
+import { registerServiceWorker } from "./pwa.js";
+import { convertAmount, expectancy, maxDrawdown, profitFactor, winRate } from "./calc.js";
+import { fetchRate as fetchRateData } from "./rate.js";
+
 (function(){
-var APP_VERSION="1.3.0",R=16500,RT=null,RK="jurnalcuan_rate",KEY="jurnalcuan_v1",SET="jurnalcuan_set",KELAS=["Saham","Kripto","Forex","Komoditas"];
-var storage=window.ledgerlyDesktop?window.ledgerlyDesktop.storage:window.localStorage;
+var APP_VERSION="1.4.0",R=16500,RT=null,RK=STORAGE_KEYS.rate,KEY=STORAGE_KEYS.transactions,SET=STORAGE_KEYS.settings,KELAS=["Saham","Kripto","Forex","Komoditas"];
+var storage=getStorage();
 function requestJson(url,options){return window.ledgerlyDesktop?window.ledgerlyDesktop.fetchJson(url,options||{}):fetch(url,options||{}).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()})}
 var CC={Saham:"var(--c-saham)",Kripto:"var(--c-kripto)",Forex:"var(--c-forex)",Komoditas:"var(--c-komoditas)"};
 var cur="IDR",flt="Semua",T=[];
 var $=function(i){return document.getElementById(i)};
 var nid=new Intl.NumberFormat("id-ID",{maximumFractionDigits:0}),nus=new Intl.NumberFormat("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
-function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
 function b64(bytes){var s="",i;for(i=0;i<bytes.length;i++)s+=String.fromCharCode(bytes[i]);return btoa(s)}
 function bytes(s){var raw=atob(s),a=new Uint8Array(raw.length),i;for(i=0;i<raw.length;i++)a[i]=raw.charCodeAt(i);return a}
 function digest(s){return crypto.subtle.digest("SHA-256",new TextEncoder().encode(s)).then(function(x){return b64(new Uint8Array(x))})}
@@ -14,16 +19,11 @@ function derive(password,salt){return crypto.subtle.importKey("raw",new TextEnco
 function validTransactions(value){return Array.isArray(value)&&value.every(function(t){return t&&typeof t==="object"&&typeof t.id==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(t.date)&&KELAS.indexOf(t.kelas)>=0&&typeof t.sym==="string"&&t.sym.length<=32&&(t.cur==="IDR"||t.cur==="USD")&&typeof t.pl==="number"&&isFinite(t.pl)})}
 function encryptBackup(password){var salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12)),data=new TextEncoder().encode(JSON.stringify({version:1,transactions:T}));return derive(password,salt).then(function(key){return crypto.subtle.encrypt({name:"AES-GCM",iv:iv},key,data)}).then(function(cipher){return JSON.stringify({version:2,encrypted:true,salt:b64(salt),iv:b64(iv),data:b64(new Uint8Array(cipher))})})}
 function decryptBackup(data,password){return derive(password,bytes(data.salt)).then(function(key){return crypto.subtle.decrypt({name:"AES-GCM",iv:bytes(data.iv)},key,bytes(data.data))}).then(function(raw){return JSON.parse(new TextDecoder().decode(raw))})}
-function inputNumber(s){var v=String(s||"").replace(/[^\d,.-]/g,"").replace(/\./g,"").replace(",",".");return parseFloat(v)||0}
-function formatInput(s){var v=String(s||"").replace(/[^\d,]/g,""),p=v.split(","),n=p[0].replace(/^0+(?=\d)/,"")||"0";n=n.replace(/\B(?=(\d{3})+(?!\d))/g,".");return p.length>1?n+","+p[1].slice(0,2):n}
-function formatSignedInput(s){var v=String(s||""),negative=/^-/.test(v),formatted=formatInput(v.replace(/[^\d,]/g,""));return (negative?"-":"")+formatted}
-function idr(t){return t.cur==="USD"?t.pl*R:t.pl}
+function idr(t){return convertAmount(t.pl,t.cur,R)}
 function money(v,sg){var x=cur==="IDR"?v:v/R,a=Math.abs(x),s=(sg?(x>0?"+":x<0?"-":""):(x<0?"-":""));return s+(cur==="IDR"?"Rp"+nid.format(Math.round(a)):"$"+nus.format(a))}
 function own(t){var a=Math.abs(t.pl),s=t.pl>0?"+":t.pl<0?"-":"";return s+(t.cur==="IDR"?"Rp "+nid.format(Math.round(a)):"$"+nus.format(a))}
 function sh(v){var x=cur==="IDR"?v:v/R,a=Math.abs(x),s=x<0?"-":"",p=cur==="IDR"?"Rp ":"$ ";if(a>=1e9)return s+p+(a/1e9).toFixed(1)+" M";if(a>=1e6)return s+p+(a/1e6).toFixed(1)+" jt";if(a>=1e3)return s+p+Math.round(a/1e3)+" rb";return s+p+Math.round(a)}
 function compactMoney(v,sg){return money(v,sg)}
-function dfmt(d){return new Date(d+"T00:00:00").toLocaleDateString("id-ID",{day:"numeric",month:"short",year:"numeric"})}
-function cl(n){return n>0?"pos":n<0?"neg":""}
 function seed(){
   var s=[["2026-09-06","Saham","BBCA","IDR",1250000],["2026-09-08","Kripto","BTC","USD",1850],["2026-09-10","Saham","TLKM","IDR",-480000],["2026-09-12","Komoditas","XAU/USD","USD",900],["2026-09-14","Kripto","ETH","USD",920],["2026-09-16","Forex","GBP/JPY","USD",14500],["2026-09-17","Saham","ASII","IDR",2100000],["2026-09-18","Komoditas","XAU/USD","USD",-450],["2026-09-19","Kripto","SOL","USD",2400],["2026-09-21","Forex","EUR/USD","USD",4200],["2026-09-23","Kripto","ETH","USD",-640],["2026-09-25","Saham","BMRI","IDR",1750000],["2026-09-27","Komoditas","WTI","USD",700],["2026-09-29","Forex","USD/JPY","USD",-2800],["2026-10-01","Saham","GOTO","IDR",-620000],["2026-10-03","Kripto","BTC","USD",1300],["2026-10-05","Komoditas","XAU/USD","USD",1300],["2026-10-07","Saham","UNVR","IDR",-310000],["2026-10-09","Kripto","DOGE","USD",-380],["2026-10-12","Komoditas","XAG/USD","USD",-300],["2026-10-14","Saham","ANTM","IDR",1900000],["2026-10-16","Forex","GBP/JPY","USD",21000],["2026-10-19","Kripto","SOL","USD",1750],["2026-10-21","Komoditas","WTI","USD",520],["2026-10-23","Forex","EUR/USD","USD",-1900],["2026-10-25","Saham","BBRI","IDR",980000],["2026-10-27","Kripto","BNB","USD",600],["2026-10-28","Komoditas","XAU/USD","USD",650]];
   return s.map(function(r,i){var f=r[1]==="Forex"||r[1]==="Komoditas";return{id:"s"+i,date:r[0],kelas:r[1],sym:r[2],cur:r[3],pl:r[4],dur:30+(i*37)%200,lot:f?+(0.1+(i%5)*0.1).toFixed(2):0,fee:r[3]==="USD"?+(1.5+i%4).toFixed(2):2500,swap:f?+(0.4+i%3*0.3).toFixed(2):0,jam:pad(8+(i*5)%14)+":"+pad((i*17)%60)}});
@@ -43,11 +43,11 @@ function stats(v){
   var tot=0,gw=0,gl=0,w=0,by={};
   v.forEach(function(t){var x=idr(t);tot+=x;if(x>0){gw+=x;w++}else if(x<0)gl-=x;by[t.sym]=by[t.sym]||{s:0,k:t.kelas};by[t.sym].s+=x});
   var best=null;Object.keys(by).forEach(function(k){if(!best||by[k].s>by[best].s)best=k});
-  var wr=v.length?w/v.length*100:0,l=v.filter(function(t){return idr(t)<0}).length;
+  var wr=winRate(v.map(idr)),l=v.filter(function(t){return idr(t)<0}).length;
   $("stats").innerHTML=
    '<div class="card"><div class="k"><span>Total Bersih P&amp;L</span></div><div class="big '+cl(tot)+'">'+money(tot,true)+'</div><div class="sub">dari '+v.length+' transaksi terfilter</div></div>'+
    '<div class="card"><div class="k"><span>Tingkat Kemenangan</span><span>%</span></div><div class="big">'+wr.toFixed(1).replace(".",",")+'%</div><div class="sub"><span class="pos">'+w+' menang</span> / <span class="neg">'+l+' kalah</span></div><div class="prog"><i style="width:'+wr+'%"></i></div></div>'+
-   '<div class="card"><div class="k"><span>Total Transaksi</span></div><div class="big">'+v.length+'</div><div class="sub">Profit Factor: '+(gl?(gw/gl).toFixed(2):(gw?"∞":"-"))+'</div></div>'+
+   '<div class="card"><div class="k"><span>Total Transaksi</span></div><div class="big">'+v.length+'</div><div class="sub">Profit Factor: '+(function(){var pf=profitFactor(v.map(idr));return pf===Infinity?"∞":pf?pf.toFixed(2):"-"})()+'</div></div>'+
    '<div class="card"><div class="k"><span>Aset Terbaik</span></div><div class="big">'+(best?esc(best):"-")+'</div><div class="sub">'+(best?esc(by[best].k)+" · "+money(by[best].s,true):"Belum ada data")+'</div></div>';
 }
 function nice(x){var p=Math.pow(10,Math.floor(Math.log10(x))),f=x/p;return(f<=1?1:f<=2?2:f<=5?5:10)*p}
@@ -170,20 +170,21 @@ function hmFetch(){
     hm.live[hm.mode]=n?Date.now():0;if(!n)hm.error="Marketstack tidak mengembalikan data untuk simbol ini";hmRender();
   }).catch(function(error){hm.error=error.message||"tidak dapat terhubung ke Marketstack";hmRender()});
 }
-var AK="jurnalcuan_acc",acc={cur:"USD",start:250000,dep:0};
+var AK=STORAGE_KEYS.account,acc={cur:"USD",start:250000,dep:0};
 try{var ac0=JSON.parse(storage.getItem(AK)||"null");if(ac0&&ac0.start>=0)acc=ac0}catch(e){}
 function aI(x){return acc.cur==="USD"?x*R:x}
 function ci(t,x){return t.cur==="USD"?x*R:x}
 function sm(a){return a.reduce(function(s,x){return s+x},0)}
-function pc(x,d){return x.toFixed(d==null?1:d).replace(".",",")}
+
 function pr(a,b,c){return'<div class="pr"><span>'+a+'</span><b'+(c?' class="'+c+'"':"")+'>'+b+'</b></div>'}
 function perf(v){
   var tv=v.map(idr),n=tv.length,net=sm(tv),base=aI(acc.start+acc.dep),
   w=tv.filter(function(x){return x>0}),l=tv.filter(function(x){return x<0}),
   gw=sm(w),gl=Math.abs(sm(l)),aw=w.length?gw/w.length:0,al=l.length?gl/l.length:0,
-  wr=n?w.length/n*100:0,be=(aw+al)?al/(aw+al)*100:0,ret=base?net/base*100:0,
+  wr=winRate(tv),be=(aw+al)?al/(aw+al)*100:0,ret=base?net/base*100:0,
   bal=base,pk=base,mdd=0,mp=0,dm={},od=[];
   v.forEach(function(t){var x=idr(t);if(!dm[t.date]){dm[t.date]={s:bal,p:0};od.push(t.date)}dm[t.date].p+=x;bal+=x;if(bal>pk)pk=bal;var d=pk-bal;if(d>mdd){mdd=d;mp=pk?d/pk*100:0}});
+  mp=maxDrawdown(tv,base);
   var cd=pk-bal,cp=pk?cd/pk*100:0,r=od.map(function(d){return dm[d].s?dm[d].p/dm[d].s:0}),m=avg(r),
   sd=Math.sqrt(avg(r.map(function(x){return(x-m)*(x-m)}))),dn=Math.sqrt(avg(r.map(function(x){return x<0?x*x:0}))),
   sh=r.length>1&&sd>0?m/sd*Math.sqrt(252):null,so=r.length>1&&dn>0?m/dn*Math.sqrt(252):null,
@@ -193,7 +194,7 @@ function perf(v){
   var ok=wr>=be;
   $("perfBody").innerHTML=
   '<div class="pt"><div><div class="k"><span>Net P&amp;L</span></div><div class="big '+cl(net)+'">'+money(net,true)+'</div></div><div class="rtn"><div class="k"><span>Return</span></div><div class="big '+cl(ret)+'">'+(ret>0?"+":"")+pc(ret,2)+'%</div></div></div>'+
-  '<div class="sbox"><div class="s3"><div><span>Win rate</span><b>'+pc(wr)+'%</b></div><div><span>Profit factor</span><b>'+(gl?(gw/gl).toFixed(2):(gw?"∞":"-"))+'</b></div><div><span>Expectancy</span><b class="'+cl(net)+'">'+(n?money(net/n,true):"-")+'</b></div></div>'+
+  '<div class="sbox"><div class="s3"><div><span>Win rate</span><b>'+pc(wr)+'%</b></div><div><span>Profit factor</span><b>'+(function(){var pf=profitFactor(tv);return pf===Infinity?"∞":pf?pf.toFixed(2):"-"})()+'</b></div><div><span>Expectancy</span><b class="'+cl(net)+'">'+(n?money(expectancy(tv),true):"-")+'</b></div></div>'+
   '<div class="meter"><div class="mt"><i style="width:'+Math.min(100,wr)+'%"></i><u style="left:'+Math.min(100,be)+'%"></u></div><div class="ml"><span class="'+(ok?"pos":"neg")+'">'+pc(Math.abs(wr-be))+' poin '+(ok?"di atas":"di bawah")+' break-even</span><span>Break-even di '+pc(be)+'%</span></div></div></div>'+
   '<div class="trio"><div><h3>Risiko</h3>'+pr("Max drawdown",n?money(-mdd)+" · "+pc(mp,2)+"%":"-","neg")+pr("Drawdown saat ini",n?money(-cd)+" · "+pc(cp,2)+"%":"-",cd>0?"neg":"")+pr("Sharpe ratio",sh===null?"-":sh.toFixed(2))+pr("Sortino ratio",so===null?"-":so.toFixed(2))+'</div>'+
   '<div><h3>Akun</h3>'+pr("Saldo",money(balance))+pr("Modal awal",money(aI(acc.start)))+pr("Setoran",money(aI(acc.dep)))+'</div>'+
@@ -257,8 +258,8 @@ function dist(v){
   Array.prototype.forEach.call($("dsM").children,function(b){b.setAttribute("aria-pressed",b.getAttribute("data-v")===DS.m)});
 }
 var BO=["metrics","portfolio","calendar","heatmap"],WH={},WL=[["stats","Kartu statistik","metrics"],["an","Winrate, rasio, winstreak","metrics"],["perf","Ringkasan performa","metrics"],["equity","Equity curve dan distribusi kelas","metrics"],["riwayat","Riwayat transaksi","metrics"],["calendar","Kalender","calendar"],["daily","Net Daily P&amp;L","calendar"],["dist","Distribusi trade","calendar"],["yearly","Performa tahunan","calendar"],["heatmap","Heatmap pasar","heatmap"]];
-try{WH=JSON.parse(storage.getItem("jurnalcuan_w")||"{}")||{}}catch(e){WH={}}
-function wSave(){try{storage.setItem("jurnalcuan_w",JSON.stringify(WH))}catch(e){}}
+try{WH=JSON.parse(storage.getItem(STORAGE_KEYS.widgets)||"{}")||{}}catch(e){WH={}}
+function wSave(){try{storage.setItem(STORAGE_KEYS.widgets,JSON.stringify(WH))}catch(e){}}
 function applyW(){Array.prototype.forEach.call(document.querySelectorAll("[data-w]"),function(e){e.classList.toggle("wh",!!WH[e.getAttribute("data-w")])})}
 function wList(){var b=$("main").getAttribute("data-board");$("wList").innerHTML=WL.filter(function(w){return w[2]===b}).map(function(w){return'<label class="ck"><input type="checkbox" data-k="'+w[0]+'"'+(WH[w[0]]?"":" checked")+'>'+w[1]+'</label>'}).join("")}
 function setBoard(b){
@@ -268,7 +269,6 @@ function setBoard(b){
   applyW();render();portfolio();hmRender();
 }
 var cm=null,sel=null;
-function pad(n){return(n<10?"0":"")+n}
 function cf(x){if(cur==="USD"){var q=x/R,a=Math.abs(q);return(q<0?"-":"")+"$"+(a>=1000?(a/1000).toFixed(1).replace(".",",")+" rb":nus.format(a))}var b=Math.abs(x),s=x<0?"-":"";if(b>=1e9)return s+(b/1e9).toFixed(1).replace(".",",")+" M";if(b>=1e6)return s+(b/1e6).toFixed(1).replace(".",",")+" jt";if(b>=1e3)return s+Math.round(b/1e3)+" rb";return s+Math.round(b)}
 function cal(v){
   if(!cm){var last=v.length?v[v.length-1].date:new Date().toISOString().slice(0,10);cm={y:+last.slice(0,4),m:+last.slice(5,7)-1}}
@@ -381,14 +381,9 @@ function installExtraControls(){
   if(window.ledgerlyDesktop)window.ledgerlyDesktop.onMenu(function(action){if(action==="backup"&&b)b.click();if(action==="import"&&r)r.click()});
 }
 function fetchRate(){LF=Date.now();
-  var src=[["https://open.er-api.com/v6/latest/USD",function(j){return{r:j.rates&&j.rates.IDR,t:j.time_last_update_unix?j.time_last_update_unix*1000:Date.now()}}],
-           ["https://api.frankfurter.dev/v1/latest?base=USD&symbols=IDR",function(j){return{r:j.rates&&j.rates.IDR,t:Date.parse(j.date)||Date.now()}}]],i=0;
-  (function next(){
-    if(i>=src.length)return;var u=src[i++];
-    requestJson(u[0]).then(function(j){
-    var o=u[1](j);if(o.r>1000){R=o.r;RT=o.t;try{storage.setItem(RK,JSON.stringify({r:R,t:RT}))}catch(e){}render()}else next();
-    }).catch(next);
-  })();
+  fetchRateData(R).then(function(result){
+    if(result&&result.rate>1000){R=result.rate;RT=result.timestamp;render()}
+  });
 }
 try{var rc=JSON.parse(storage.getItem(RK)||"null");if(rc&&rc.r>1000){R=rc.r;RT=rc.t}}catch(e){}
 window.addEventListener("resize",function(){chart(vis());hmRender();daily(visK());dist(vis())});
@@ -398,6 +393,6 @@ $("hmKeySave").onclick=function(){if(window.LedgerlyMarketstack)window.LedgerlyM
 hmRender();hmFetch();setInterval(hmFetch,300000);
 setInterval(fetchRate,3600000);
 document.addEventListener("visibilitychange",function(){if(!document.hidden&&Date.now()-LF>36e5)fetchRate()});
-load();themeIcon();render();installExtraControls();setBoard(location.hash.slice(1));fetchRate();checkForUpdate();if(!window.ledgerlyDesktop&&"serviceWorker" in navigator)navigator.serviceWorker.register("ledgerly-sw.js").catch(function(){});
+load();themeIcon();render();installExtraControls();setBoard(location.hash.slice(1));fetchRate();checkForUpdate();registerServiceWorker().catch(function(){});
 try{if(storage.getItem("ledgerly_pin_hash")){var entered=prompt("Masukkan PIN Ledgerly:");digest(entered||"").then(function(hash){if(hash!==storage.getItem("ledgerly_pin_hash")){alert("PIN salah. Aplikasi dikunci.");document.body.innerHTML="<main style='padding:32px;font-family:system-ui'><h1>Akses ditolak</h1><p>Reload halaman lalu masukkan PIN yang benar.</p></main>"}})}}catch(e){alert("Verifikasi PIN gagal.")};
 })();

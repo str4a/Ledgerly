@@ -1,4 +1,5 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain, safeStorage, session } = require("electron");
+const { autoUpdater } = require("electron-updater");
 const fs = require("node:fs");
 const path = require("node:path");
 const { createStorage } = require("./storage");
@@ -11,6 +12,18 @@ if (!gotLock) {
   let storage;
   let userData;
   const defaultBounds = { width: 1280, height: 820 };
+  const allowedStorageKeys = new Set([
+    "jurnalcuan_v1", "jurnalcuan_set", "jurnalcuan_rate", "jurnalcuan_acc",
+    "jurnalcuan_w", "jc_fh", "jc_goapi", "ledgerly_marketstack_key",
+    "ledgerly_first_run_done", "ledgerly_pin_hash"
+  ]);
+  const allowedNetworkOrigins = new Set([
+    "https://api.coingecko.com",
+    "https://api.marketstack.com",
+    "https://open.er-api.com",
+    "https://api.frankfurter.dev"
+  ]);
+  const maxNetworkResponseBytes = 2 * 1024 * 1024;
 
   function readWindowState() {
     try {
@@ -29,6 +42,51 @@ if (!gotLock) {
     const temporary = `${filePath}.tmp`;
     fs.writeFileSync(temporary, content, "utf8");
     fs.renameSync(temporary, filePath);
+  }
+
+  function assertStorageKey(key) {
+    if (typeof key !== "string" || !allowedStorageKeys.has(key)) {
+      throw new Error("Storage key tidak diizinkan");
+    }
+  }
+
+  function assertTrustedSender(event) {
+    if (!mainWindow || event.sender !== mainWindow.webContents) {
+      throw new Error("IPC sender tidak tepercaya");
+    }
+  }
+
+  function validateNetworkUrl(url) {
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new Error("URL jaringan tidak valid");
+    }
+    if (parsed.protocol !== "https:" || !allowedNetworkOrigins.has(parsed.origin)) {
+      throw new Error("Origin jaringan tidak diizinkan");
+    }
+    return parsed;
+  }
+
+  async function fetchJson(url) {
+    const parsed = validateNetworkUrl(url);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await fetch(parsed, { method: "GET", signal: controller.signal });
+      const length = Number(response.headers.get("content-length") || 0);
+      if (length > maxNetworkResponseBytes) throw new Error("Respons jaringan terlalu besar");
+      const text = await response.text();
+      if (Buffer.byteLength(text, "utf8") > maxNetworkResponseBytes) {
+        throw new Error("Respons jaringan terlalu besar");
+      }
+      const body = JSON.parse(text);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return body;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   function createBackup() {
@@ -51,6 +109,7 @@ if (!gotLock) {
         submenu: [
           { label: "Backup", click: () => mainWindow?.webContents.send("menu:backup") },
           { label: "Import", click: () => mainWindow?.webContents.send("menu:import") },
+          { label: "Periksa pembaruan", click: checkForUpdates },
           { type: "separator" },
           { role: "quit" }
         ]
@@ -69,6 +128,75 @@ if (!gotLock) {
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   }
 
+  async function checkForUpdates() {
+    if (!app.isPackaged) {
+      await dialog.showMessageBox(mainWindow, {
+        type: "info",
+        title: "Pembaruan Ledgerly",
+        message: "Pembaruan otomatis hanya tersedia pada aplikasi terpasang."
+      });
+      return;
+    }
+    try {
+      await autoUpdater.checkForUpdates();
+    } catch (error) {
+      await dialog.showMessageBox(mainWindow, {
+        type: "error",
+        title: "Pembaruan gagal",
+        message: `Tidak dapat memeriksa pembaruan: ${error.message}`
+      });
+    }
+  }
+
+  function configureUpdater() {
+    if (!app.isPackaged) return;
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = true;
+    autoUpdater.on("update-available", async (info) => {
+      const result = await dialog.showMessageBox(mainWindow, {
+        type: "info",
+        buttons: ["Unduh sekarang", "Nanti"],
+        defaultId: 0,
+        cancelId: 1,
+        title: "Pembaruan Ledgerly tersedia",
+        message: `Versi ${info.version} tersedia. Unduh sekarang?`
+      });
+      if (result.response === 0) {
+        try {
+          await autoUpdater.downloadUpdate();
+        } catch (error) {
+          await dialog.showMessageBox(mainWindow, {
+            type: "error",
+            title: "Unduhan gagal",
+            message: `Pembaruan gagal diunduh: ${error.message}`
+          });
+        }
+      }
+    });
+    autoUpdater.on("update-not-available", () => {
+      dialog.showMessageBox(mainWindow, {
+        type: "info",
+        title: "Pembaruan Ledgerly",
+        message: "Ledgerly sudah menggunakan versi terbaru."
+      });
+    });
+    autoUpdater.on("update-downloaded", async () => {
+      const result = await dialog.showMessageBox(mainWindow, {
+        type: "info",
+        buttons: ["Mulai ulang sekarang", "Nanti"],
+        defaultId: 0,
+        cancelId: 1,
+        title: "Pembaruan siap dipasang",
+        message: "Pembaruan sudah diunduh dan siap dipasang."
+      });
+      if (result.response === 0) autoUpdater.quitAndInstall();
+    });
+    autoUpdater.on("error", (error) => {
+      console.error("Ledgerly update failed:", error);
+    });
+    setTimeout(checkForUpdates, 3000);
+  }
+
   function createWindow() {
     const bounds = readWindowState();
     mainWindow = new BrowserWindow({
@@ -82,6 +210,15 @@ if (!gotLock) {
         webSecurity: true
       }
     });
+    mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    mainWindow.webContents.on("will-navigate", (event, url) => {
+      let pathname = "";
+      try { pathname = decodeURIComponent(new URL(url).pathname); } catch {}
+      if (!url.startsWith("file://") || !pathname.endsWith("/Ledgerly-live.html")) {
+        event.preventDefault();
+      }
+    });
+    mainWindow.webContents.on("will-attach-webview", (event) => event.preventDefault());
     mainWindow.once("ready-to-show", () => mainWindow.show());
     mainWindow.webContents.once("did-finish-load", async () => {
       if (!storage.get("ledgerly_first_run_done")) {
@@ -119,34 +256,49 @@ if (!gotLock) {
         "Content-Security-Policy": ["default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://api.coingecko.com https://api.marketstack.com https://open.er-api.com https://api.frankfurter.dev"]
       }});
     });
-    ipcMain.on("storage:get", (event, key) => { event.returnValue = storage.get(key); });
-    ipcMain.on("storage:set", (event, key, value) => { storage.set(key, value); event.returnValue = true; });
-    ipcMain.on("storage:remove", (event, key) => { storage.remove(key); event.returnValue = true; });
+    session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+    ipcMain.on("storage:get", (event, key) => {
+      assertTrustedSender(event); assertStorageKey(key); event.returnValue = storage.get(key);
+    });
+    ipcMain.on("storage:set", (event, key, value) => {
+      assertTrustedSender(event); assertStorageKey(key);
+      if (typeof value !== "string" || value.length > 2 * 1024 * 1024) throw new Error("Nilai storage tidak valid");
+      storage.set(key, value); event.returnValue = true;
+    });
+    ipcMain.on("storage:remove", (event, key) => {
+      assertTrustedSender(event); assertStorageKey(key); storage.remove(key); event.returnValue = true;
+    });
     ipcMain.on("api-key:get", (event) => {
+      assertTrustedSender(event);
       event.returnValue = safeStorage.isEncryptionAvailable() && Boolean(storage.get("ledgerly_marketstack_key"))
         ? "Tersimpan aman"
         : "";
     });
     ipcMain.on("api-key:set", (event, value) => {
+      assertTrustedSender(event);
+      if (typeof value !== "string" || value.length > 256) throw new Error("API key tidak valid");
       if (!value) storage.remove("ledgerly_marketstack_key");
       else if (safeStorage.isEncryptionAvailable()) storage.set("ledgerly_marketstack_key", safeStorage.encryptString(value).toString("base64"));
       event.returnValue = true;
     });
     ipcMain.handle("network:json", async (_event, url, options) => {
-      const response = await fetch(url, { method: options.method || "GET", headers: options.headers || {} });
-      const body = await response.json();
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return body;
+      assertTrustedSender(_event);
+      if (options && Object.keys(options).length) throw new Error("Opsi jaringan tidak diizinkan");
+      return fetchJson(url);
     });
     ipcMain.handle("network:marketstack", async (_event, symbols) => {
+      assertTrustedSender(_event);
+      if (!Array.isArray(symbols) || symbols.length === 0 || symbols.length > 50 ||
+          symbols.some((symbol) => typeof symbol !== "string" || !/^[A-Za-z0-9._/-]{1,20}$/.test(symbol))) {
+        throw new Error("Daftar simbol tidak valid");
+      }
       let key = "";
       const encrypted = storage.get("ledgerly_marketstack_key");
       if (encrypted && safeStorage.isEncryptionAvailable()) key = safeStorage.decryptString(Buffer.from(encrypted, "base64"));
       if (!key) throw new Error("API key Marketstack belum diisi");
       const url = `https://api.marketstack.com/v2/eod?access_key=${encodeURIComponent(key)}&symbols=${encodeURIComponent(symbols.join(","))}&limit=${symbols.length}`;
-      const response = await fetch(url);
-      const body = await response.json();
-      if (!response.ok || body.error) throw new Error(body.error?.message || `Marketstack HTTP ${response.status}`);
+      const body = await fetchJson(url);
+      if (body.error) throw new Error(body.error?.message || "Marketstack gagal");
       const latest = {};
       (Array.isArray(body.data) ? body.data : []).forEach((row) => {
         const symbol = String(row.symbol || "").toUpperCase();
@@ -160,6 +312,7 @@ if (!gotLock) {
     });
     createMenu();
     createWindow();
+    configureUpdater();
   });
 
   app.on("before-quit", () => createBackup());

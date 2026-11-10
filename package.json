@@ -1,17 +1,18 @@
 {
   "name": "ledgerly",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Ledgerly trading journal desktop application",
   "main": "desktop/main.js",
   "scripts": {
     "dev": "electron .",
     "dist": "electron-builder --win nsis portable",
-    "test": "node --check ledgerly-live.js && node --check marketstack-api.js && node --check desktop/main.js && node --check desktop/preload.js && node --check desktop/storage.js",
+    "test": "node --test test/*.test.js",
     "icons": "node desktop/create-icon.js"
   },
   "devDependencies": {
     "electron": "^39.0.0",
     "electron-builder": "^26.0.12",
+    "electron-updater": "^6.6.2",
     "png-to-ico": "^3.0.1"
   },
   "build": {
@@ -20,7 +21,7 @@
     "files": [
       "Ledgerly-live.html",
       "ledgerly-live.css",
-      "ledgerly-live.js",
+      "src/**/*",
       "marketstack-api.js",
       "ledgerly.webmanifest",
       "ledgerly-app-icon-v2-192.png",
@@ -36,10 +37,19 @@
       ],
       "icon": "desktop/icon.ico"
     },
+    "publish": {
+      "provider": "github",
+      "owner": "str4a",
+      "repo": "Ledgerly",
+      "private": false
+    },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
   }
 }

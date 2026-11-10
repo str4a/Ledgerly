@@ -1,10 +1,15 @@
-var CACHE_NAME="ledgerly-v36";
+var CACHE_NAME="ledgerly-v37";
 var APP_SHELL=[
   "./",
   "./Ledgerly-live.html",
   "./ledgerly-live.css",
   "./ledgerly.webmanifest",
-  "./ledgerly-live.js",
+  "./src/main.js",
+  "./src/state.js",
+  "./src/format.js",
+  "./src/calc.js",
+  "./src/rate.js",
+  "./src/pwa.js",
   "./marketstack-api.js",
   "./version.json",
   "./Ledgerly Golden Orbit Logo.png",
