@@ -1,0 +1,25 @@
+{
+  "name": "Ledgerly",
+  "short_name": "Ledgerly",
+  "description": "Dashboard pencatatan transaksi dan P&L trading.",
+  "start_url": "./Ledgerly-live.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0e0e10",
+  "theme_color": "#0e0e10",
+  "lang": "id",
+  "icons": [
+    {
+      "src": "./ledgerly-app-icon-v2-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./ledgerly-app-icon-v2-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

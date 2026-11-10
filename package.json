@@ -1,0 +1,45 @@
+{
+  "name": "ledgerly",
+  "version": "1.3.0",
+  "description": "Ledgerly trading journal desktop application",
+  "main": "desktop/main.js",
+  "scripts": {
+    "dev": "electron .",
+    "dist": "electron-builder --win nsis portable",
+    "test": "node --check ledgerly-live.js && node --check marketstack-api.js && node --check desktop/main.js && node --check desktop/preload.js && node --check desktop/storage.js",
+    "icons": "node desktop/create-icon.js"
+  },
+  "devDependencies": {
+    "electron": "^39.0.0",
+    "electron-builder": "^26.0.12",
+    "png-to-ico": "^3.0.1"
+  },
+  "build": {
+    "appId": "com.ledgerly.app",
+    "productName": "Ledgerly",
+    "files": [
+      "Ledgerly-live.html",
+      "ledgerly-live.css",
+      "ledgerly-live.js",
+      "marketstack-api.js",
+      "ledgerly.webmanifest",
+      "ledgerly-app-icon-v2-192.png",
+      "ledgerly-app-icon-v2-512.png",
+      "Ledgerly Golden Orbit Logo.png",
+      "desktop/**/*",
+      "version.json"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "desktop/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    }
+  }
+}
