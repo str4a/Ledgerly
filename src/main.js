@@ -5,7 +5,7 @@ import { convertAmount, expectancy, maxDrawdown, profitFactor, winRate } from ".
 import { fetchRate as fetchRateData } from "./rate.js";
 
 (function(){
-var APP_VERSION="1.4.0",R=16500,RT=null,RK=STORAGE_KEYS.rate,KEY=STORAGE_KEYS.transactions,SET=STORAGE_KEYS.settings,KELAS=["Saham","Kripto","Forex","Komoditas"];
+var APP_VERSION="1.4.1",R=16500,RT=null,RK=STORAGE_KEYS.rate,KEY=STORAGE_KEYS.transactions,SET=STORAGE_KEYS.settings,KELAS=["Saham","Kripto","Forex","Komoditas"];
 var storage=getStorage();
 function requestJson(url,options){return window.ledgerlyDesktop?window.ledgerlyDesktop.fetchJson(url,options||{}):fetch(url,options||{}).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()})}
 var CC={Saham:"var(--c-saham)",Kripto:"var(--c-kripto)",Forex:"var(--c-forex)",Komoditas:"var(--c-komoditas)"};
@@ -383,6 +383,10 @@ function installExtraControls(){
 function fetchRate(){LF=Date.now();
   fetchRateData(R).then(function(result){
     if(result&&result.rate>1000){R=result.rate;RT=result.timestamp;render()}
+  }).catch(function(error){
+    var note=$("note");
+    if(note){note.hidden=false;note.textContent="Kurs USD/IDR gagal diperbarui. Menggunakan kurs terakhir. Periksa koneksi internet lalu coba lagi.";note.dataset.error=error.message||"rate error"}
+    render();
   });
 }
 try{var rc=JSON.parse(storage.getItem(RK)||"null");if(rc&&rc.r>1000){R=rc.r;RT=rc.t}}catch(e){}

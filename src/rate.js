@@ -11,6 +11,7 @@ export async function fetchRate(currentRate, desktopFetch = window.ledgerlyDeskt
       timestamp: Date.parse(body.date) || Date.now()
     })]
   ];
+  let lastError;
   for (const [url, parse] of sources) {
     try {
       const body = desktopFetch
@@ -24,8 +25,11 @@ export async function fetchRate(currentRate, desktopFetch = window.ledgerlyDeskt
         writeJson(getStorage(), STORAGE_KEYS.rate, { r: result.rate, t: result.timestamp });
         return result;
       }
-    } catch {}
+    } catch (error) {
+      lastError = error;
+    }
   }
+  if (lastError) throw lastError;
   return currentRate;
 }
 
