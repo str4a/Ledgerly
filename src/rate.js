@@ -14,12 +14,18 @@ export async function fetchRate(currentRate, desktopFetch = window.ledgerlyDeskt
   let lastError;
   for (const [url, parse] of sources) {
     try {
-      const body = desktopFetch
-        ? await desktopFetch(url)
-        : await fetch(url).then((response) => {
+      let body;
+      try {
+        body = desktopFetch ? await desktopFetch(url) : null;
+      } catch (error) {
+        lastError = error;
+      }
+      if (!body) {
+        body = await fetch(url).then((response) => {
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           return response.json();
         });
+      }
       const result = parse(body);
       if (result.rate > 1000) {
         writeJson(getStorage(), STORAGE_KEYS.rate, { r: result.rate, t: result.timestamp });

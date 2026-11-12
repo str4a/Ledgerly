@@ -1,6 +1,6 @@
 {
   "name": "ledgerly",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Ledgerly trading journal desktop application",
   "main": "desktop/main.js",
   "scripts": {
