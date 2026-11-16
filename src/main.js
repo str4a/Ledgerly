@@ -5,7 +5,7 @@ import { convertAmount, expectancy, maxDrawdown, profitFactor, winRate } from ".
 import { fetchRate as fetchRateData } from "./rate.js";
 
 (function(){
-var APP_VERSION="1.4.2",R=16500,RT=null,RK=STORAGE_KEYS.rate,KEY=STORAGE_KEYS.transactions,SET=STORAGE_KEYS.settings,KELAS=["Saham","Kripto","Forex","Komoditas"];
+var APP_VERSION="1.4.3",R=16500,RT=null,RK=STORAGE_KEYS.rate,KEY=STORAGE_KEYS.transactions,SET=STORAGE_KEYS.settings,KELAS=["Saham","Kripto","Forex","Komoditas"];
 var storage=getStorage();
 function requestJson(url,options){return window.ledgerlyDesktop?window.ledgerlyDesktop.fetchJson(url,options||{}):fetch(url,options||{}).then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.json()})}
 var CC={Saham:"var(--c-saham)",Kripto:"var(--c-kripto)",Forex:"var(--c-forex)",Komoditas:"var(--c-komoditas)"};
@@ -341,6 +341,7 @@ $("csvBtn").onclick=function(){
   var v=vis();$("csvTxt").value="tanggal,kelas,aset,mata_uang,hasil\n"+v.map(function(t){return[t.date,t.kelas,'"'+t.sym.replace(/"/g,'""')+'"',t.cur,t.pl].join(",")}).join("\n");$("csvDlg").showModal();
 };
 $("csvCopy").onclick=function(){var ta=$("csvTxt");ta.select();try{navigator.clipboard.writeText(ta.value);$("csvCopy").textContent="Tersalin"}catch(e){document.execCommand&&document.execCommand("copy")}};
+$("csvDownload").onclick=function(){var blob=new Blob([$("csvTxt").value],{type:"text/csv;charset=utf-8"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="ledgerly-trades-"+new Date().toISOString().slice(0,10)+".csv";a.click();setTimeout(function(){URL.revokeObjectURL(a.href)},1000)};
 $("csvClose").onclick=function(){$("csvDlg").close();$("csvCopy").textContent="Salin"};
 $("per").onclick=function(e){var p=e.target.getAttribute("data-p");if(p){per=p;render()}};
 $("accBtn").onclick=function(){$("ac").value=acc.cur;$("as").value=formatInput(acc.start);$("ad").value=formatInput(acc.dep);$("accDlg").showModal()};
@@ -368,10 +369,32 @@ function checkForUpdate(){
     if(v.version!==APP_VERSION){b.textContent="Update tersedia";b.dataset.ready="true"}else if(b.dataset.ready!=="true"){b.textContent="Sudah terbaru";setTimeout(function(){if(b.dataset.ready!=="true")b.textContent="Cek update"},2200)}
   }).catch(function(){});
 }
+function askPassword(title,callback){
+  $("passwordTitle").textContent=title;
+  $("passwordInput").value="";
+  $("passwordDlg").showModal();
+  $("passwordOk").onclick=function(){var password=$("passwordInput").value;if(password.length<8){alert("Password minimal 8 karakter.");return}$("passwordDlg").close();callback(password)};
+}
+function parseCsv(text){
+  var rows=[],row=[],cell="",quoted=false,i,c;
+  for(i=0;i<text.length;i++){c=text[i];if(c==='"'){if(quoted&&text[i+1]==='"'){cell+='"';i++}else quoted=!quoted}else if(c===","&&!quoted){row.push(cell);cell=""}else if((c==="\n"||c==="\r")&&!quoted){if(c==="\r"&&text[i+1]==="\n")i++;row.push(cell);if(row.some(function(v){return v.trim()}))rows.push(row);row=[];cell=""}else cell+=c}
+  if(cell||row.length){row.push(cell);rows.push(row)}
+  return rows;
+}
+function importCsv(text){
+  var rows=parseCsv(text),header=rows.shift().map(function(v){return v.trim().toLowerCase()}),required=["tanggal","kelas","aset","mata_uang","hasil"];
+  if(required.some(function(key){return header.indexOf(key)<0}))throw new Error("Kolom CSV wajib: tanggal, kelas, aset, mata_uang, hasil");
+  var index={};header.forEach(function(key,i){index[key]=i});
+  var imported=rows.map(function(row,i){var pl=Number(String(row[index.hasil]||"").replace(/\./g,"").replace(",", "."));if(!/^\d{4}-\d{2}-\d{2}$/.test(row[index.tanggal])||KELAS.indexOf(row[index.kelas])<0||(row[index.mata_uang]!=="IDR"&&row[index.mata_uang]!=="USD")||!row[index.aset]||!isFinite(pl))throw new Error("Baris CSV tidak valid: "+(i+2));return{id:"csv"+Date.now()+i,date:row[index.tanggal],kelas:row[index.kelas],sym:row[index.aset].trim().toUpperCase(),cur:row[index.mata_uang],pl:pl}});
+  if(!imported.length)throw new Error("CSV tidak berisi transaksi");
+  T=T.concat(imported);save();render();
+}
 function installExtraControls(){
-  var b=document.getElementById("backupBtn"),r=document.getElementById("restoreBtn"),f=document.getElementById("restoreFile"),c=document.getElementById("clearBtn"),u=document.getElementById("updateBtn"),security=document.getElementById("securityBtn");
-  if(b)b.onclick=function(){var password=prompt("Buat password untuk mengenkripsi backup:");if(!password||password.length<8){if(password!==null)alert("Password backup minimal 8 karakter.");return}encryptBackup(password).then(function(payload){var a=document.createElement("a"),blob=new Blob([payload],{type:"application/json"});a.href=URL.createObjectURL(blob);a.download="ledgerly-backup-encrypted-"+new Date().toISOString().slice(0,10)+".json";a.click();setTimeout(function(){URL.revokeObjectURL(a.href)},1000)}).catch(function(){alert("Backup terenkripsi gagal dibuat.")})};
-  if(r&&f){r.onclick=function(){f.click()};f.onchange=function(){var file=f.files&&f.files[0];if(!file)return;var reader=new FileReader();reader.onload=function(){try{var data=JSON.parse(reader.result);var result=data.encrypted?decryptBackup(data,prompt("Masukkan password backup:")):Promise.resolve(data);result.then(function(decoded){if(!validTransactions(decoded.transactions))throw new Error("Format tidak valid");if(!confirm("Import akan mengganti seluruh riwayat transaksi. Lanjutkan?"))return;T=decoded.transactions;save();render()}).catch(function(){alert("Backup tidak valid atau password salah.")})}catch(e){alert("File backup tidak valid.")}};reader.readAsText(file);f.value=""}};
+  var b=document.getElementById("backupBtn"),r=document.getElementById("restoreBtn"),f=document.getElementById("restoreFile"),ci=document.getElementById("csvImportBtn"),cf=document.getElementById("csvImportFile"),c=document.getElementById("clearBtn"),u=document.getElementById("updateBtn"),security=document.getElementById("securityBtn");
+  $("passwordCancel").onclick=function(){$("passwordDlg").close()};
+  if(b)b.onclick=function(){askPassword("Buat password backup",function(password){encryptBackup(password).then(function(payload){var a=document.createElement("a"),blob=new Blob([payload],{type:"application/json"});a.href=URL.createObjectURL(blob);a.download="ledgerly-backup-encrypted-"+new Date().toISOString().slice(0,10)+".json";a.click();setTimeout(function(){URL.revokeObjectURL(a.href)},1000)}).catch(function(){alert("Backup terenkripsi gagal dibuat.")})})};
+  if(r&&f){r.onclick=function(){f.click()};f.onchange=function(){var file=f.files&&f.files[0];if(!file)return;var reader=new FileReader();reader.onload=function(){try{var data=JSON.parse(reader.result),finish=function(decoded){if(!validTransactions(decoded.transactions))throw new Error("Format tidak valid");if(!confirm("Import akan mengganti seluruh riwayat transaksi. Lanjutkan?"))return;T=decoded.transactions;save();render()};if(data.encrypted)askPassword("Masukkan password backup",function(password){decryptBackup(data,password).then(finish).catch(function(){alert("Backup tidak valid atau password salah.")})});else finish(data)}catch(e){alert("File backup tidak valid.")}};reader.readAsText(file);f.value=""}};
+  if(ci&&cf){ci.onclick=function(){cf.click()};cf.onchange=function(){var file=cf.files&&cf.files[0];if(!file)return;var reader=new FileReader();reader.onload=function(){try{importCsv(reader.result);alert("CSV berhasil diimpor.")}catch(e){alert(e.message||"CSV tidak valid.")}};reader.readAsText(file);cf.value=""}};
   if(c)c.onclick=function(){if(confirm("Hapus semua riwayat transaksi?")){T=[];save();render()}};
   if(u)u.onclick=function(){if(u.dataset.ready==="true")location.reload();else checkForUpdate()};
   if(security)security.onclick=function(){$("securityDlg").showModal()};

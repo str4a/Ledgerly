@@ -1,4 +1,4 @@
-var CACHE_NAME="ledgerly-v37";
+var CACHE_NAME="ledgerly-v39";
 var APP_SHELL=[
   "./",
   "./Ledgerly-live.html",
